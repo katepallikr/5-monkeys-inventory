@@ -1,36 +1,20 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 5 Monkeys Inventory
 
-## Getting Started
+This is the main inventory management app for 5 Monkeys. It handles tracking everything for the kitchen, bar, and hookah setup. Built with Next.js and Prisma for the db.
 
-First, run the development server:
+## getting started
+
+1. Check that your `.env` is set up with the right db connection string. If you don't have it, ping someone on the team.
+2. Run `npm install` to grab the latest packages. 
+3. Start up the dev server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+It should be running at `http://localhost:3000`. To access the dashboard locally, just use the fallback dev pin (1234) for now. We will map this to real user accounts later.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## notes
+- This uses the Next.js app router so try to keep server actions separated in the `app/actions/` folder instead of mixing them into components.
+- There's a known quirk where Prisma sometimes gets out of sync locally. If your build fails complaining about missing types or exports, just run `npx prisma generate` to fix it up.
+- We recently cleaned up the unused boilerplate SVGs and old folders, so try to keep things tidy before pushing.

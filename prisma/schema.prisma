@@ -1,0 +1,294 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Enums
+enum Role {
+  ADMIN
+  MANAGER
+  STAFF
+}
+
+enum ItemType {
+  KITCHEN
+  BAR
+  HOOKAH
+}
+
+enum UnitType {
+  EACH
+  BOTTLE
+  CASE
+  LB
+  OZ
+  ML
+  GRAM
+  BOX
+  PACK
+  CANISTER
+  HOOKAH_JAR
+  COAL_BOX
+  KEG
+  LITER
+}
+
+enum TransactionType {
+  SALE        // Depletion from POS
+  RECEIVE     // Increase from PO/Invoice
+  COUNT       // Adjustment from Count Session
+  ADJUST      // Manual correction
+  WASTE       // Spillage/Loss
+  TRANSFER    // Internal transfer (future proof)
+}
+
+enum POStatus {
+  DRAFT
+  SENT
+  PARTIAL
+  CLOSED
+  CANCELLED
+}
+
+enum CountStatus {
+  OPEN
+  COMPLETED
+  CANCELLED
+}
+
+// User Management
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  pinCode   String?  // For simple quick login
+  role      Role     @default(STAFF)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions  Transaction[]
+  countSessions CountSession[]
+}
+
+// Vendors
+model Vendor {
+  id        String   @id @default(uuid())
+  name      String
+  contact   String?
+  email     String?
+  phone     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items          Item[] // Items where this is the preferred vendor
+  purchaseOrders PurchaseOrder[]
+  priceHistory   VendorPriceHistory[]
+}
+
+// Categories
+model Category {
+  id   String   @id @default(uuid())
+  name String
+  type ItemType
+
+  subCategories SubCategory[]
+  items         Item[]
+}
+
+model SubCategory {
+  id         String   @id @default(uuid())
+  name       String
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+  items      Item[]
+}
+
+// Inventory Items
+model Item {
+  id              String      @id @default(uuid())
+  name            String
+  sku             String?
+  brand           String?
+  description     String?
+  active          Boolean     @default(true)
+  
+  // Categorization
+  categoryId      String
+  category        Category    @relation(fields: [categoryId], references: [id])
+  subCategoryId   String?
+  subCategory     SubCategory? @relation(fields: [subCategoryId], references: [id])
+  
+  // Units & Pack Info
+  type            ItemType    // Kitchen, Bar, Hookah
+  unitType        UnitType    // The base tracking unit (e.g., OZ, BOTTLE, EACH)
+  packSize        String?     // e.g., "12 bottles/case"
+  conversionFactor Float      @default(1.0) // Multiplier to base unit if needed
+
+  // Storage
+  storageLocation String?     // Dry Storage, Walk-in, Bar Shelf, etc.
+
+  // Inventory Levels
+  onHand          Float       @default(0.0) // Current stock in unitType
+  minPar          Float       @default(0.0)
+  maxPar          Float?
+  reorderQty      Float       @default(0.0)
+
+  // Costing
+  cost            Float       @default(0.0) // Current moving average cost or last cost
+  preferredVendorId String?
+  preferredVendor   Vendor?   @relation(fields: [preferredVendorId], references: [id])
+  lastPurchasedAt   DateTime?
+
+  // Bar Specific
+  pourSizeOz      Float?      // e.g. 1.5
+  bottleVolumeMl  Float?      // e.g. 750
+
+  // Hookah Specific
+  bowlUsageGrams  Float?
+  coalUsageCount  Float?
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // Relations
+  transactions      Transaction[]
+  recipeIngredients RecipeIngredient[]
+  vendorPrices      VendorPriceHistory[]
+  countItems        CountSessionItem[]
+  poItems           PurchaseOrderItem[]
+}
+
+// Recipes (for depletion)
+model Recipe {
+  id          String   @id @default(uuid())
+  name        String   // Matches POS Menu Item Name
+  description String?
+  yield       Float    @default(1.0)
+  active      Boolean  @default(true)
+  category    String?  // Grouping for recipes
+
+  ingredients RecipeIngredient[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model RecipeIngredient {
+  id        String @id @default(uuid())
+  recipeId  String
+  recipe    Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  itemId    String
+  item      Item   @relation(fields: [itemId], references: [id])
+  
+  quantity  Float  // Quantity to deplete per recipe yield
+  unit      String // Display unit (reference)
+}
+
+// Transactions (Audit Trail)
+model Transaction {
+  id           String          @id @default(uuid())
+  type         TransactionType
+  itemId       String
+  item         Item            @relation(fields: [itemId], references: [id])
+  
+  quantityChange Float         // Positive for increase, Negative for decrease
+  costAtTime     Float?        
+  reason       String?         // "Sales Import #123", "Broken Bottle", etc.
+  referenceId  String?         // Link to PO ID, Count Session ID, or Batch ID
+
+  userId       String?
+  user         User?           @relation(fields: [userId], references: [id])
+  
+  createdAt    DateTime        @default(now())
+}
+
+// Counting
+model CountSession {
+  id        String      @id @default(uuid())
+  name      String      // e.g. "Weekly Bar Count"
+  type      ItemType?   // If null, full count
+  status    CountStatus @default(OPEN)
+  
+  startedAt   DateTime    @default(now())
+  completedAt DateTime?
+  
+  userId    String
+  user      User        @relation(fields: [userId], references: [id])
+  
+  items     CountSessionItem[]
+}
+
+model CountSessionItem {
+  id             String       @id @default(uuid())
+  sessionId      String
+  session        CountSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  itemId         String
+  item           Item         @relation(fields: [itemId], references: [id])
+  
+  expectedOnHand Float
+  counted        Float?
+  
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+// Purchasing
+model PurchaseOrder {
+  id              String        @id @default(uuid())
+  // poNumber removed due to SQLite limitation with UUID PKS
+  vendorId        String
+  vendor          Vendor        @relation(fields: [vendorId], references: [id])
+  
+  status          POStatus      @default(DRAFT)
+  expectedDate    DateTime?
+  totalCost       Float         @default(0.0)
+  
+  notes           String?
+  sourceFile      String?
+  
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  items           PurchaseOrderItem[]
+}
+
+model SalesBatch {
+  id          String   @id @default(uuid())
+  filename    String   @unique
+  processedAt DateTime @default(now())
+  
+  startDate   DateTime?
+  endDate     DateTime?
+  
+  totalUnits  Float    @default(0.0)
+}
+
+model PurchaseOrderItem {
+  id        String        @id @default(uuid())
+  poId      String
+  po        PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+  
+  itemId    String
+  item      Item          @relation(fields: [itemId], references: [id])
+  
+  quantity  Float
+  unitCost  Float
+  // totalCost = quantity * unitCost (computed)
+}
+
+model VendorPriceHistory {
+  id        String   @id @default(uuid())
+  vendorId  String
+  vendor    Vendor   @relation(fields: [vendorId], references: [id])
+  itemId    String
+  item      Item     @relation(fields: [itemId], references: [id])
+  
+  price     Float
+  date      DateTime @default(now())
+}
