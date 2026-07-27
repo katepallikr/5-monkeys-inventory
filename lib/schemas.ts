@@ -35,10 +35,14 @@ export const itemSchema = z.object({
 })
 export type ItemFormValues = z.infer<typeof itemSchema>
 
-// Sales (pmix) CSV/XLSX row - only the columns the importer actually uses
-export const pmixRowSchema = z.object({
-    "Menu Item": z.string().trim().min(1, "Menu Item is required"),
-    "Item Qty": z.coerce.number({ error: "Item Qty must be a number" }),
+// Sales report row, normalized to a canonical shape. Different POS exports use
+// different column names for the same two fields we actually need - see
+// normalizeSalesRow() in app/actions/sales-actions.ts for the per-format mapping
+// (e.g. Toast "pmix" export uses Menu Item/Item Qty, Square's Item Sales export
+// uses Item/Qty sold).
+export const salesRowSchema = z.object({
+    menuItemName: z.string().trim().min(1, "item name is required"),
+    qtySold: z.coerce.number({ error: "quantity sold must be a number" }),
 })
 
 // Sysco order export header line ("H,...")

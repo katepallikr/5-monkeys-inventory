@@ -3,7 +3,18 @@
 import { prisma } from "@/lib/prisma"
 import { revalidatePath } from "next/cache"
 import * as XLSX from 'xlsx' // Using xlsx for CSV parsing as it's robust
-import { pmixRowSchema, validateImportFile } from "@/lib/schemas"
+import { salesRowSchema, validateImportFile } from "@/lib/schemas"
+
+// Different POS exports use different column names for the same two fields.
+// Add an entry here to support another export format.
+const ITEM_NAME_COLUMNS = ["Menu Item", "Item"] // Toast pmix / Square Item Sales
+const QTY_SOLD_COLUMNS = ["Item Qty", "Qty sold"] // Toast pmix / Square Item Sales
+
+function normalizeSalesRow(row: Record<string, unknown>) {
+    const menuItemName = ITEM_NAME_COLUMNS.map((col) => row[col]).find((v) => v !== undefined)
+    const qtySold = QTY_SOLD_COLUMNS.map((col) => row[col]).find((v) => v !== undefined)
+    return { menuItemName, qtySold }
+}
 
 export async function importSales(formData: FormData) {
     const file = formData.get('file') as File | null
@@ -50,12 +61,12 @@ export async function importSales(formData: FormData) {
         const validRows: { menuItemName: string; qtySold: number }[] = []
 
         for (let i = 0; i < rawRows.length; i++) {
-            const parsed = pmixRowSchema.safeParse(rawRows[i])
+            const parsed = salesRowSchema.safeParse(normalizeSalesRow(rawRows[i]))
 
             if (!parsed.success) {
-                // Summary/subtotal lines and blank rows commonly lack a Menu Item name -
+                // Summary/subtotal lines and blank rows commonly lack an item name -
                 // treat those as expected skips, but keep a sample of real parse errors.
-                const menuItemMissing = parsed.error.issues.every((issue) => issue.path[0] === "Menu Item")
+                const menuItemMissing = parsed.error.issues.every((issue) => issue.path[0] === "menuItemName")
                 if (!menuItemMissing && rowErrors.length < 10) {
                     rowErrors.push(`Row ${i + 2}: ${parsed.error.issues.map((e) => e.message).join(", ")}`)
                 }
@@ -63,18 +74,18 @@ export async function importSales(formData: FormData) {
                 continue
             }
 
-            if (parsed.data["Item Qty"] === 0) {
+            if (parsed.data.qtySold === 0) {
                 skippedRowCount++
                 continue
             }
 
-            validRows.push({ menuItemName: parsed.data["Menu Item"], qtySold: parsed.data["Item Qty"] })
+            validRows.push(parsed.data)
         }
 
         if (validRows.length === 0) {
             return {
                 success: false,
-                error: "No valid sales rows were found. Check that the file has 'Menu Item' and 'Item Qty' columns."
+                error: "No valid sales rows were found. Expected a 'Menu Item'/'Item Qty' (Toast) or 'Item'/'Qty sold' (Square) column pair."
             }
         }
 
