@@ -8,9 +8,17 @@ import { importSales } from "@/app/actions/sales-actions"
 import { toast } from "sonner"
 import { Loader2, Upload } from "lucide-react"
 
+interface SalesImportStats {
+    processedCount: number
+    missingRecipeCount: number
+    depletionCount: number
+    skippedRowCount: number
+    rowErrors: string[]
+}
+
 export default function SalesUploadPage() {
     const [uploading, setUploading] = useState(false)
-    const [stats, setStats] = useState<{ processedCount: number, missingRecipeCount: number, depletionCount: number } | null>(null)
+    const [stats, setStats] = useState<SalesImportStats | null>(null)
 
     async function handleUpload(e: React.FormEvent<HTMLFormElement>) {
         e.preventDefault()
@@ -28,9 +36,13 @@ export default function SalesUploadPage() {
 
         if (res.success && res.data) {
             setStats(res.data)
-            toast.success("Import successful!")
+            if (res.data.skippedRowCount > 0) {
+                toast.warning(`Import complete with ${res.data.skippedRowCount} row(s) skipped`)
+            } else {
+                toast.success("Import successful!")
+            }
         } else {
-            toast.error("Import failed")
+            toast.error(res.error || "Import failed")
         }
     }
 
@@ -92,6 +104,23 @@ export default function SalesUploadPage() {
                         </CardContent>
                     </Card>
                 </div>
+            )}
+
+            {stats && stats.rowErrors.length > 0 && (
+                <Card className="border-destructive/50">
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-medium text-destructive">
+                            {stats.skippedRowCount} row(s) skipped
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <ul className="text-xs text-muted-foreground space-y-1 list-disc pl-4">
+                            {stats.rowErrors.map((err, i) => (
+                                <li key={i}>{err}</li>
+                            ))}
+                        </ul>
+                    </CardContent>
+                </Card>
             )}
         </div>
     )

@@ -48,7 +48,14 @@ export function ImportPODialog({ vendors }: { vendors: Vendor[] }) {
         try {
             const res = await importPurchaseOrder(formData)
             if (res.success) {
-                toast.success("PO Imported Successfully")
+                if (res.data && (res.data.unmatchedCount > 0 || res.data.malformedLineCount > 0)) {
+                    toast.warning(
+                        `PO imported: ${res.data.matchedCount} item(s) matched, ${res.data.unmatchedCount} unmatched, ${res.data.malformedLineCount} malformed line(s) skipped`,
+                        { duration: 6000 }
+                    )
+                } else {
+                    toast.success("PO Imported Successfully")
+                }
                 setOpen(false)
             } else {
                 // If it's a duplicate, the error message will say so

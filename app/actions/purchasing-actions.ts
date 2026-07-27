@@ -1,128 +1,169 @@
 "use server"
 
 import { prisma } from "@/lib/prisma"
-import { PurchaseOrder, PurchaseOrderItem, POStatus } from "@prisma/client"
 import { revalidatePath } from "next/cache"
-
-import { format } from "date-fns"
+import {
+    syscoHeaderSchema,
+    syscoLineItemSchema,
+    validateImportFile,
+    createPoSchema,
+    addPOItemSchema,
+    formatZodError,
+} from "@/lib/schemas"
 
 // ... previous exports
 
-export async function importPurchaseOrder(formData: FormData) {
-    const file = formData.get('file') as File
-    const vendorId = formData.get('vendorId') as string
+function splitCsvLine(line: string): string[] {
+    const row = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g)
+    if (!row) return []
+    return row.map((c) => c.replace(/^"|"$/g, '').replace(/,$/, '').trim())
+}
 
-    if (!file || !vendorId) return { success: false, error: "Missing file or vendor" }
+export async function importPurchaseOrder(formData: FormData) {
+    const file = formData.get('file') as File | null
+    const vendorId = formData.get('vendorId') as string | null
+
+    const fileError = validateImportFile(file, ["csv"])
+    if (fileError) return { success: false, error: fileError }
+    if (!vendorId) return { success: false, error: "Please select a vendor" }
 
     try {
-        const buffer = await file.arrayBuffer()
+        const buffer = await file!.arrayBuffer()
         const text = new TextDecoder().decode(buffer)
-        const lines = text.split('\n')
+        const lines = text.split('\n').filter((l) => l.trim().length > 0)
 
-        // Sysco Header Logic
-        const firstLine = lines[0].split(',').map(s => s.replace(/"/g, '').trim())
-
-        let fileDate: Date | null = null
-        let fileTotal = 0
-
-        if (firstLine[0] === 'H') {
-            // Sysco: H,O0601,013,705791,Jan 18 2026 11:04 PM ,01/21/2026,Y,, ,06845151,06845151,1305.29
-            const dateStr = firstLine[4]
-            fileDate = new Date(dateStr)
-            fileTotal = parseFloat(firstLine[11])
+        if (lines.length === 0) {
+            return { success: false, error: "The file is empty" }
         }
 
-        if (!fileDate || isNaN(fileTotal)) {
-            return { success: false, error: "Could not identify Sysco header (Date/Total missing)" }
+        // Sysco Header Logic: H,O0601,013,705791,Jan 18 2026 11:04 PM ,01/21/2026,Y,, ,06845151,06845151,1305.29
+        const firstLine = splitCsvLine(lines[0])
+
+        if (firstLine[0] !== 'H') {
+            return { success: false, error: "Could not find a Sysco header row (expected the first line to start with 'H')" }
+        }
+
+        const headerParsed = syscoHeaderSchema.safeParse({ dateStr: firstLine[4], total: firstLine[11] })
+        if (!headerParsed.success) {
+            return { success: false, error: `Invalid Sysco header: ${headerParsed.error.issues.map((i) => i.message).join(", ")}` }
+        }
+
+        const fileDate = new Date(headerParsed.data.dateStr)
+        if (isNaN(fileDate.getTime())) {
+            return { success: false, error: `Could not parse order date "${headerParsed.data.dateStr}" from the header` }
+        }
+        const fileTotal = headerParsed.data.total
+
+        // Parse + structurally validate product lines before writing anything to the DB
+        type ParsedLine = { sku: string; qty: number; desc?: string; rawCost?: string }
+        const parsedLines: ParsedLine[] = []
+        let malformedLineCount = 0
+
+        for (let i = 1; i < lines.length; i++) {
+            const cleanRow = splitCsvLine(lines[i])
+            if (cleanRow[0] !== 'P') continue
+
+            const lineParsed = syscoLineItemSchema.safeParse({ sku: cleanRow[1], qty: cleanRow[2] })
+            if (!lineParsed.success) {
+                malformedLineCount++
+                continue
+            }
+
+            parsedLines.push({
+                sku: lineParsed.data.sku,
+                qty: lineParsed.data.qty,
+                desc: cleanRow[7],
+                rawCost: cleanRow[11] || cleanRow[10],
+            })
+        }
+
+        if (parsedLines.length === 0) {
+            return { success: false, error: "No valid product lines ('P' rows) were found in the file" }
         }
 
         // DUPLICATE CHECK
+        // Match on vendor + source filename only. The stored totalCost is computed from
+        // matched line items (see below) and can legitimately differ from the file
+        // header's stated total, so comparing against it here made duplicates slip through.
         const existingPO = await prisma.purchaseOrder.findFirst({
             where: {
                 vendorId: vendorId,
-                totalCost: fileTotal,
-                sourceFile: file.name
+                sourceFile: file!.name
             }
         })
 
         if (existingPO) {
-            return { success: false, error: `Duplicate: PO with total $${fileTotal} from file '${file.name}' already exists.` }
+            return { success: false, error: `Duplicate: a PO from file '${file!.name}' already exists for this vendor.` }
         }
 
-        // Create PO
-        let po = await prisma.purchaseOrder.create({
-            data: {
-                vendorId,
-                status: "DRAFT",
-                totalCost: 0, // Will update
-                expectedDate: fileDate,
-                sourceFile: file.name,
-                notes: `Imported from ${file.name}`
-            }
-        })
-
         let calculatedTotal = 0
+        let matchedCount = 0
+        const unmatchedSkus: string[] = []
 
-        // Parse Items
-        for (let i = 1; i < lines.length; i++) {
-            // Simple regex for CSV splitting ignoring commas in quotes
-            const row = lines[i].match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g)
-            if (!row) continue
-
-            const cleanRow = row.map(c => c.replace(/^"|"$/g, '').replace(/,$/, '').trim())
-
-            if (cleanRow[0] !== 'P') continue
-
-            const sku = cleanRow[1]
-            const qty = parseFloat(cleanRow[2])
-            const desc = cleanRow[7]
-            const rawCost = cleanRow[11] || cleanRow[10]
-
-            if (!sku) continue
-
-            // Find Item
-            let item = await prisma.item.findFirst({
-                where: { sku: sku }
-            })
-
-            if (!item && desc) {
-                item = await prisma.item.findFirst({ where: { name: desc } })
-            }
-
-            if (!item) {
-                continue // Skip unknowns for now as per plan
-            }
-
-            let unitCost = parseFloat(rawCost) || 0
-            if (unitCost === 0 && item.cost > 0) {
-                unitCost = item.cost // Fallback
-            }
-
-            await prisma.purchaseOrderItem.create({
+        // Wrap PO creation + line items in a transaction so a mid-import failure
+        // doesn't leave a partially-populated purchase order behind.
+        await prisma.$transaction(async (tx) => {
+            const po = await tx.purchaseOrder.create({
                 data: {
-                    poId: po.id,
-                    itemId: item.id,
-                    quantity: qty,
-                    unitCost: unitCost
+                    vendorId,
+                    status: "DRAFT",
+                    totalCost: 0, // Will update
+                    expectedDate: fileDate,
+                    sourceFile: file!.name,
+                    notes: `Imported from ${file!.name}`
                 }
             })
 
-            calculatedTotal += (qty * unitCost)
-        }
+            for (const { sku, qty, desc, rawCost } of parsedLines) {
+                // Find Item
+                let item = await tx.item.findFirst({
+                    where: { sku: sku }
+                })
 
-        // Update Total
-        await prisma.purchaseOrder.update({
-            where: { id: po.id },
-            data: { totalCost: calculatedTotal } // Use calculated total to be safe, or separate field?
-            // Actually, for duplication check we used file header total. 
-            // If we parsed correctly, they should match. Let's stick with calculated.
+                if (!item && desc) {
+                    item = await tx.item.findFirst({ where: { name: desc } })
+                }
+
+                if (!item) {
+                    if (unmatchedSkus.length < 20) unmatchedSkus.push(sku)
+                    continue // Skip unknowns for now as per plan
+                }
+
+                let unitCost = parseFloat(rawCost || "") || 0
+                if (unitCost === 0 && item.cost > 0) {
+                    unitCost = item.cost // Fallback
+                }
+
+                await tx.purchaseOrderItem.create({
+                    data: {
+                        poId: po.id,
+                        itemId: item.id,
+                        quantity: qty,
+                        unitCost: unitCost
+                    }
+                })
+
+                calculatedTotal += (qty * unitCost)
+                matchedCount++
+            }
+
+            // Update Total
+            await tx.purchaseOrder.update({
+                where: { id: po.id },
+                data: { totalCost: calculatedTotal } // Use calculated total to be safe, or separate field?
+                // Actually, for duplication check we used file header total.
+                // If we parsed correctly, they should match. Let's stick with calculated.
+            })
         })
 
         revalidatePath('/purchasing')
-        return { success: true }
-    } catch (e: any) {
+        return {
+            success: true,
+            data: { matchedCount, unmatchedCount: unmatchedSkus.length, unmatchedSkus, malformedLineCount }
+        }
+    } catch (e: unknown) {
         console.error("PO Import Error", e)
-        return { success: false, error: e.message }
+        return { success: false, error: e instanceof Error ? e.message : "Import failed. No changes were saved." }
     }
 }
 
@@ -142,37 +183,40 @@ export async function getPO(id: string) {
 }
 
 export async function createPO(vendorId: string) {
+    const parsed = createPoSchema.safeParse({ vendorId })
+    if (!parsed.success) return { success: false, error: formatZodError(parsed.error) }
+
     try {
         const po = await prisma.purchaseOrder.create({
             data: {
-                vendorId,
+                vendorId: parsed.data.vendorId,
                 status: "DRAFT"
             }
         })
         revalidatePath('/purchasing')
         return { success: true, id: po.id }
     } catch (error) {
+        console.error("Failed to create PO:", error)
         return { success: false, error: "Failed to create PO" }
     }
 }
 
 export async function addPOItem(poId: string, itemId: string, quantity: number, unitCost: number) {
+    const parsed = addPOItemSchema.safeParse({ poId, itemId, quantity, unitCost })
+    if (!parsed.success) return { success: false, error: formatZodError(parsed.error) }
+
     try {
         await prisma.purchaseOrderItem.create({
-            data: {
-                poId,
-                itemId,
-                quantity,
-                unitCost
-            }
+            data: parsed.data
         })
         // Update total cost
-        await recalculatePOTotal(poId)
+        await recalculatePOTotal(parsed.data.poId)
 
-        revalidatePath(`/purchasing/${poId}`)
+        revalidatePath(`/purchasing/${parsed.data.poId}`)
         return { success: true }
     } catch (error) {
-        return { success: false }
+        console.error("Failed to add PO item:", error)
+        return { success: false, error: "Failed to add item to PO" }
     }
 }
 

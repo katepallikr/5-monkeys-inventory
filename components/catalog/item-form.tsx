@@ -2,7 +2,6 @@
 
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useForm } from "react-hook-form"
-import * as z from "zod"
 import { Button } from "@/components/ui/button"
 import {
     Form,
@@ -22,24 +21,9 @@ import {
 } from "@/components/ui/select"
 import { Category, SubCategory, Vendor, ItemType, UnitType } from "@prisma/client"
 import { createItem } from "@/app/actions/item-actions"
+import { itemSchema, type ItemFormValues } from "@/lib/schemas"
 import { useState } from "react"
 import { Loader2 } from "lucide-react"
-
-const itemSchema = z.object({
-    name: z.string().min(2, "Name must be at least 2 characters."),
-    type: z.nativeEnum(ItemType),
-    categoryId: z.string().min(1, "Category is required"),
-    subCategoryId: z.string().optional(),
-    unitType: z.nativeEnum(UnitType),
-    minPar: z.coerce.number().min(0, "Must be positive"),
-    onHand: z.coerce.number().min(0),
-    preferredVendorId: z.string().optional(),
-    storageLocation: z.string().optional(),
-    pourSizeOz: z.coerce.number().optional(),
-    bottleVolumeMl: z.coerce.number().optional()
-})
-
-type ItemFormValues = z.infer<typeof itemSchema>
 
 interface ItemFormProps {
     categories: (Category & { subCategories: SubCategory[] })[]

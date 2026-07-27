@@ -3,22 +3,18 @@
 import { prisma } from "@/lib/prisma"
 import { revalidatePath } from "next/cache"
 import * as XLSX from 'xlsx' // Using xlsx for CSV parsing as it's robust
-
-// CSV Structure based on inspection
-interface PmixRow {
-    "Menu Item": string
-    "Item Qty": number
-    // other fields...
-}
+import { pmixRowSchema, validateImportFile } from "@/lib/schemas"
 
 export async function importSales(formData: FormData) {
-    const file = formData.get('file') as File
-    if (!file) return { success: false, error: "No file uploaded" }
+    const file = formData.get('file') as File | null
+
+    const fileError = validateImportFile(file, ["csv", "xlsx", "xls"])
+    if (fileError) return { success: false, error: fileError }
 
     try {
         // Check for duplicate file
         const existingBatch = await prisma.salesBatch.findUnique({
-            where: { filename: file.name }
+            where: { filename: file!.name }
         })
 
         if (existingBatch) {
@@ -28,11 +24,59 @@ export async function importSales(formData: FormData) {
             }
         }
 
-        const buffer = await file.arrayBuffer()
-        const workbook = XLSX.read(buffer, { type: 'buffer' })
+        const buffer = await file!.arrayBuffer()
+        let workbook: XLSX.WorkBook
+        try {
+            workbook = XLSX.read(buffer, { type: 'buffer' })
+        } catch {
+            return { success: false, error: "Could not read file. Make sure it's a valid CSV or Excel export." }
+        }
+
         const sheetName = workbook.SheetNames[0]
+        if (!sheetName) {
+            return { success: false, error: "The file has no sheets/data to import." }
+        }
         const sheet = workbook.Sheets[sheetName]
-        const rows = XLSX.utils.sheet_to_json(sheet) as any[]
+        const rawRows = XLSX.utils.sheet_to_json(sheet) as Record<string, unknown>[]
+
+        if (rawRows.length === 0) {
+            return { success: false, error: "The file has no rows to import." }
+        }
+
+        // Validate every row up front so a malformed file is rejected before
+        // any database writes happen (no orphaned SalesBatch on failure).
+        let skippedRowCount = 0
+        const rowErrors: string[] = []
+        const validRows: { menuItemName: string; qtySold: number }[] = []
+
+        for (let i = 0; i < rawRows.length; i++) {
+            const parsed = pmixRowSchema.safeParse(rawRows[i])
+
+            if (!parsed.success) {
+                // Summary/subtotal lines and blank rows commonly lack a Menu Item name -
+                // treat those as expected skips, but keep a sample of real parse errors.
+                const menuItemMissing = parsed.error.issues.every((issue) => issue.path[0] === "Menu Item")
+                if (!menuItemMissing && rowErrors.length < 10) {
+                    rowErrors.push(`Row ${i + 2}: ${parsed.error.issues.map((e) => e.message).join(", ")}`)
+                }
+                skippedRowCount++
+                continue
+            }
+
+            if (parsed.data["Item Qty"] === 0) {
+                skippedRowCount++
+                continue
+            }
+
+            validRows.push({ menuItemName: parsed.data["Menu Item"], qtySold: parsed.data["Item Qty"] })
+        }
+
+        if (validRows.length === 0) {
+            return {
+                success: false,
+                error: "No valid sales rows were found. Check that the file has 'Menu Item' and 'Item Qty' columns."
+            }
+        }
 
         let processedCount = 0
         let depletionCount = 0
@@ -45,18 +89,12 @@ export async function importSales(formData: FormData) {
             // Create Batch Record
             await tx.salesBatch.create({
                 data: {
-                    filename: file.name,
+                    filename: file!.name,
                     totalUnits: 0 // Will update later if needed, but for now just tracking existence
                 }
             })
 
-            for (const row of rows) {
-                const menuItemName = row['Menu Item']
-                const qtySold = Number(row['Item Qty'])
-
-                // Skip summary lines or empty rows
-                if (!menuItemName || isNaN(qtySold) || qtySold === 0) continue
-
+            for (const { menuItemName, qtySold } of validRows) {
                 processedCount++
 
                 // 1. Find or Create Recipe
@@ -103,11 +141,11 @@ export async function importSales(formData: FormData) {
         revalidatePath('/recipes')
         return {
             success: true,
-            data: { processedCount, missingRecipeCount, depletionCount }
+            data: { processedCount, missingRecipeCount, depletionCount, skippedRowCount, rowErrors }
         }
 
     } catch (error) {
-        console.error("Import failed:", error)
-        return { success: false, error: "Import failed" }
+        console.error("Sales import failed:", error)
+        return { success: false, error: "Import failed. No changes were saved." }
     }
 }

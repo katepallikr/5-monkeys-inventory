@@ -12,8 +12,14 @@ import { ItemForm } from "./item-form"
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Plus } from "lucide-react"
+import { Category, SubCategory, Vendor } from "@prisma/client"
 
-export function ItemDialog({ categories, vendors }: { categories: any[], vendors: any[] }) {
+interface ItemDialogProps {
+    categories: (Category & { subCategories: SubCategory[] })[]
+    vendors: Vendor[]
+}
+
+export function ItemDialog({ categories, vendors }: ItemDialogProps) {
     const [open, setOpen] = useState(false)
 
     return (

@@ -1,8 +1,8 @@
 "use server"
 
 import { prisma } from "@/lib/prisma"
-import { Recipe, RecipeIngredient } from "@prisma/client"
 import { revalidatePath } from "next/cache"
+import { createRecipeSchema, addIngredientSchema, formatZodError } from "@/lib/schemas"
 
 export async function getRecipes() {
     return await prisma.recipe.findMany({
@@ -27,30 +27,33 @@ export async function getRecipe(id: string) {
 }
 
 export async function createRecipe(name: string) {
+    const parsed = createRecipeSchema.safeParse({ name })
+    if (!parsed.success) return { success: false, error: formatZodError(parsed.error) }
+
     try {
         const recipe = await prisma.recipe.create({
-            data: { name }
+            data: { name: parsed.data.name }
         })
         revalidatePath('/recipes')
         return { success: true, id: recipe.id }
     } catch (error) {
+        console.error("Failed to create recipe:", error)
         return { success: false, error: "Failed to create recipe" }
     }
 }
 
 export async function addIngredient(recipeId: string, itemId: string, quantity: number, unit: string) {
+    const parsed = addIngredientSchema.safeParse({ recipeId, itemId, quantity, unit })
+    if (!parsed.success) return { success: false, error: formatZodError(parsed.error) }
+
     try {
         await prisma.recipeIngredient.create({
-            data: {
-                recipeId,
-                itemId,
-                quantity,
-                unit
-            }
+            data: parsed.data
         })
-        revalidatePath(`/recipes/${recipeId}`)
+        revalidatePath(`/recipes/${parsed.data.recipeId}`)
         return { success: true }
     } catch (error) {
+        console.error("Failed to add ingredient:", error)
         return { success: false, error: "Failed to add ingredient" }
     }
 }

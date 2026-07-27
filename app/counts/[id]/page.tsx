@@ -11,7 +11,7 @@ export default async function CountSessionPage({ params }: { params: Promise<{ i
     const session = await getCountSession(id)
     if (!session) return notFound()
 
-    const items = await getItemsForCount(session.type as any)
+    const items = await getItemsForCount(session.type)
     const currentCounts = await getSessionCounts(session.id)
 
     return (

@@ -1,16 +1,20 @@
 "use server"
 
 import { prisma } from "@/lib/prisma"
-import { CountSession, ItemType } from "@prisma/client"
+import { ItemType } from "@prisma/client"
 import { revalidatePath } from "next/cache"
+import { createCountSessionSchema, saveCountSchema, formatZodError } from "@/lib/schemas"
 
 export async function createCountSession(name: string, type: ItemType | "FULL", userId: string) {
+    const parsed = createCountSessionSchema.safeParse({ name, type, userId })
+    if (!parsed.success) return { success: false, error: formatZodError(parsed.error) }
+
     try {
         const session = await prisma.countSession.create({
             data: {
-                name,
-                type: type === "FULL" ? null : type as ItemType,
-                userId: userId,
+                name: parsed.data.name,
+                type: parsed.data.type === "FULL" ? null : parsed.data.type,
+                userId: parsed.data.userId,
                 status: "OPEN"
             }
         })
@@ -67,7 +71,11 @@ export async function getItemsForCount(type: "KITCHEN" | "BAR" | "HOOKAH" | null
     })
 }
 
-export async function saveCount(sessionId: string, itemId: string, quantity: number) {
+export async function saveCount(sessionIdInput: string, itemIdInput: string, quantityInput: number) {
+    const parsed = saveCountSchema.safeParse({ sessionId: sessionIdInput, itemId: itemIdInput, quantity: quantityInput })
+    if (!parsed.success) return { success: false, error: formatZodError(parsed.error) }
+    const { sessionId, itemId, quantity } = parsed.data
+
     try {
         // Upsert the count item
         const session = await prisma.countSession.findUnique({
