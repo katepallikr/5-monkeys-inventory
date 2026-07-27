@@ -1,8 +1,9 @@
 "use server"
 
 import { prisma } from "@/lib/prisma"
-import { Item, ItemType, Category, SubCategory, Vendor } from "@prisma/client"
+import { Item, Category, SubCategory, Vendor } from "@prisma/client"
 import { revalidatePath } from "next/cache"
+import { itemSchema, formatZodError } from "@/lib/schemas"
 
 export type ItemWithRelations = Item & {
     category: Category
@@ -48,9 +49,14 @@ export async function getFormData() {
     return { categories, vendors }
 }
 
-export async function createItem(data: any) {
+export async function createItem(data: unknown) {
+    const parsed = itemSchema.safeParse(data)
+    if (!parsed.success) {
+        return { success: false, error: formatZodError(parsed.error) }
+    }
+
     try {
-        const { categoryId, subCategoryId, ...rest } = data
+        const { categoryId, subCategoryId, ...rest } = parsed.data
 
         await prisma.item.create({
             data: {

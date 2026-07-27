@@ -1,4 +1,5 @@
 import { PrismaClient, ItemType } from '@prisma/client'
+import bcrypt from 'bcryptjs'
 
 const prisma = new PrismaClient()
 
@@ -13,7 +14,7 @@ async function main() {
       email: 'admin@5monkeys.com',
       name: 'Admin User',
       role: 'ADMIN',
-      pinCode: '1234'
+      pinHash: await bcrypt.hash('1234', 10)
     },
   })
   console.log({ admin })

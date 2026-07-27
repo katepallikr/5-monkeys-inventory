@@ -65,7 +65,7 @@ model User {
   id        String   @id @default(uuid())
   name      String
   email     String   @unique
-  pinCode   String?  // For simple quick login
+  pinHash   String?  // bcrypt hash of the quick-login PIN (never store plaintext)
   role      Role     @default(STAFF)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

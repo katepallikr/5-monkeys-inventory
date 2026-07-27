@@ -20,25 +20,31 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createCountSession } from "@/app/actions/count-actions"
+import { getCurrentUser } from "@/app/actions/auth-actions"
 import { Plus } from "lucide-react"
+import { ItemType } from "@prisma/client"
+import { toast } from "sonner"
 
 export function CreateCountDialog() {
     const [open, setOpen] = useState(false)
     const [name, setName] = useState(`Count - ${new Date().toLocaleDateString()}`)
-    const [type, setType] = useState<string>("FULL")
+    const [type, setType] = useState<ItemType | "FULL">("FULL")
     const [loading, setLoading] = useState(false)
 
     async function handleSubmit() {
         setLoading(true)
-        // Hardcoded User ID for now (Admin) since no Auth context yet
-        // In prod, this would be current user ID
-        const adminId = "b7390c90-81c3-47e2-9c25-c208b5960e14" // From seed
-        const res = await createCountSession(name, type as any, adminId)
+        const user = await getCurrentUser()
+        if (!user) {
+            toast.error("You must be logged in to start a count")
+            setLoading(false)
+            return
+        }
+        const res = await createCountSession(name, type, user.id)
         setLoading(false)
         if (res.success) {
             setOpen(false)
         } else {
-            alert("Failed to create session")
+            toast.error(res.error || "Failed to create session")
         }
     }
 
@@ -61,7 +67,7 @@ export function CreateCountDialog() {
                     </div>
                     <div className="space-y-2">
                         <Label>Area Type</Label>
-                        <Select value={type} onValueChange={setType}>
+                        <Select value={type} onValueChange={(val) => setType(val as ItemType | "FULL")}>
                             <SelectTrigger>
                                 <SelectValue />
                             </SelectTrigger>
