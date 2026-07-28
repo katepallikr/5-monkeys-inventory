@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { ItemType, UnitType } from "@prisma/client"
+import { ItemType, UnitType, Role } from "@prisma/client"
 
 export function formatZodError(error: z.ZodError): string {
     return error.issues.map((i) => i.message).join("; ")
@@ -95,3 +95,33 @@ export const pinSchema = z
     .string()
     .trim()
     .regex(/^\d{4,6}$/, "PIN must be 4-6 digits")
+
+export const vendorSchema = z.object({
+    name: z.string().trim().min(1, "Vendor name is required"),
+    contact: z.string().trim().optional(),
+    email: z.string().trim().email("Invalid email").optional().or(z.literal("")),
+    phone: z.string().trim().optional(),
+})
+export type VendorFormValues = z.infer<typeof vendorSchema>
+
+export const userSchema = z.object({
+    name: z.string().trim().min(1, "Name is required"),
+    email: z.string().trim().email("Invalid email"),
+    role: z.nativeEnum(Role),
+})
+export type UserFormValues = z.infer<typeof userSchema>
+
+export const setPinSchema = z.object({
+    userId: z.string().min(1, "User is required"),
+    pin: pinSchema,
+})
+
+export const categorySchema = z.object({
+    name: z.string().trim().min(1, "Category name is required"),
+    type: z.nativeEnum(ItemType),
+})
+
+export const subCategorySchema = z.object({
+    name: z.string().trim().min(1, "Sub-category name is required"),
+    categoryId: z.string().min(1, "Category is required"),
+})

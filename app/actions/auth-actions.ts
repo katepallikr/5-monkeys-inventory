@@ -124,3 +124,13 @@ export async function getCurrentUser() {
         return null
     }
 }
+
+// Shared gate for server actions restricted to admins (staff/PIN management,
+// category structure). Returns the user on success so callers can reuse it.
+export async function requireAdmin() {
+    const user = await getCurrentUser()
+    if (!user || user.role !== "ADMIN") {
+        return { success: false as const, error: "Only admins can do that" }
+    }
+    return { success: true as const, user }
+}
