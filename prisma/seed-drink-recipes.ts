@@ -1,12 +1,12 @@
 /**
- * Sets up Recipe -> RecipeIngredient mappings for drink menu items that have an
- * unambiguous, single-match catalog item, so sales imports automatically deplete
- * inventory for them instead of just creating an empty placeholder recipe.
+ * Sets up Recipe -> RecipeIngredient mappings for drink menu items, so sales
+ * imports automatically deplete inventory for them instead of just creating an
+ * empty placeholder recipe. Mappings and pour/keg sizes below were confirmed
+ * with the business owner, not guessed.
  *
- * Only covers items that don't require a judgment call (which brand a "well"
- * pour uses, which cocktails' ingredient ratios are, draft vs. bottle for beers
- * tracked as KEG). Run again after adding more items - it upserts by recipe name
- * so it's safe to re-run.
+ * Still not covered: specialty cocktails needing an actual recipe card, and
+ * items with no catalog match at all (see chat history). Run again after
+ * adding more mappings - it's idempotent, safe to re-run.
  *
  * Usage: npx tsx prisma/seed-drink-recipes.ts
  */
@@ -16,6 +16,11 @@ const prisma = new PrismaClient()
 
 const OZ_PER_ML = 1 / 29.5735
 
+// Confirmed with the owner: half-barrel (15.5 gal) kegs, 16oz pint pours.
+const KEG_OZ = 15.5 * 128
+const PINT_OZ = 16
+const KEG_FRACTION_PER_PINT = PINT_OZ / KEG_OZ
+
 // Recipe name MUST exactly match the "Item"/"Menu Item" column value from the
 // sales report CSV - that's the string importSales() looks up by.
 interface DrinkMapping {
@@ -24,7 +29,8 @@ interface DrinkMapping {
     // For bottle-tracked spirits: pour size in oz is converted to a fraction of
     // a bottle using the catalog item's bottleVolumeMl. For items sold as a
     // whole sealed unit (canned beer/RTD tracked as EACH/BOTTLE), pass qty 1
-    // directly instead.
+    // directly instead. For draft beer tracked as KEG, pass the keg fraction
+    // per pint directly (KEG_FRACTION_PER_PINT).
     wholeUnitsPerSale?: number
 }
 
@@ -55,6 +61,20 @@ const mappings: DrinkMapping[] = [
     { recipeName: 'well teq', catalogItemName: 'Torada Silver' },
     { recipeName: 'Well whiskey', catalogItemName: 'Kentucky Deluxe' },
     { recipeName: 'Captain morgan', catalogItemName: 'Captain Morgan Original' },
+
+    // Draft beer - 16oz pint depletes a fraction of a half-barrel keg. Corona
+    // Premier is sold both ways but the POS only has one line item for it, so
+    // per the owner it defaults to draft here.
+    { recipeName: 'Michelob Ultra', catalogItemName: 'Michelob Ultra', wholeUnitsPerSale: KEG_FRACTION_PER_PINT },
+    { recipeName: 'Modelo', catalogItemName: 'Modelo', wholeUnitsPerSale: KEG_FRACTION_PER_PINT },
+    { recipeName: 'Karbach Hopadillo IPA', catalogItemName: 'Karbach Hopadillo IPA', wholeUnitsPerSale: KEG_FRACTION_PER_PINT },
+    { recipeName: 'Stella Artois', catalogItemName: 'Stella Artois', wholeUnitsPerSale: KEG_FRACTION_PER_PINT },
+    { recipeName: 'Corona Premier', catalogItemName: 'Corona Premier', wholeUnitsPerSale: KEG_FRACTION_PER_PINT },
+
+    // "Corona Extra" and "BTL Corona Extra" are the same POS item listed twice
+    // per the owner - both map to the one bottled Corona Extra catalog item.
+    { recipeName: 'Corona Extra', catalogItemName: 'Corona Extra', wholeUnitsPerSale: 1 },
+    { recipeName: 'BTL Corona Extra', catalogItemName: 'Corona Extra', wholeUnitsPerSale: 1 },
 ]
 
 async function ensureKentuckyDeluxe() {
