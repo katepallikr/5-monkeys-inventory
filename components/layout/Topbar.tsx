@@ -16,7 +16,7 @@ export function Topbar() {
                     </Button>
                 </SheetTrigger>
                 <SheetContent side="left" className="p-0 w-72">
-                    <Sidebar />
+                    <Sidebar className="flex" />
                 </SheetContent>
             </Sheet>
             <div className="ml-4 font-semibold">5 Monkeys Inventory</div>
