@@ -49,9 +49,50 @@ const mappings: DrinkMapping[] = [
     { recipeName: 'Titos', catalogItemName: 'Tito’s Handmade Vodka' },
     { recipeName: 'Grey goose', catalogItemName: 'Grey Goose' },
     { recipeName: 'Jameson Irish', catalogItemName: 'Jameson Irish' },
+
+    // Well pours - confirmed with the owner which bottle each one is.
+    { recipeName: 'Well vodka', catalogItemName: 'Taaka' },
+    { recipeName: 'well teq', catalogItemName: 'Torada Silver' },
+    { recipeName: 'Well whiskey', catalogItemName: 'Kentucky Deluxe' },
+    { recipeName: 'Captain morgan', catalogItemName: 'Captain Morgan Original' },
 ]
 
+async function ensureKentuckyDeluxe() {
+    const existing = await prisma.item.findFirst({ where: { name: 'Kentucky Deluxe' } })
+    if (existing) return
+
+    // Not in the catalog yet - confirmed as the well whiskey pour but never added.
+    // Cloned from Torada Silver (another well-tier bottle) for category/pour/bottle
+    // size, since every other well item in this catalog uses the same 2oz/1000ml
+    // pattern. Cost/par are placeholders - update them with real numbers.
+    const torada = await prisma.item.findFirst({ where: { name: 'Torada Silver' } })
+    if (!torada) {
+        console.log('SKIP creating "Kentucky Deluxe": reference item "Torada Silver" not found')
+        return
+    }
+
+    await prisma.item.create({
+        data: {
+            name: 'Kentucky Deluxe',
+            brand: 'Kentucky Deluxe',
+            type: 'BAR',
+            categoryId: torada.categoryId,
+            subCategoryId: torada.subCategoryId,
+            unitType: 'BOTTLE',
+            pourSizeOz: 2,
+            bottleVolumeMl: 1000,
+            onHand: 0,
+            minPar: 3,
+            reorderQty: 3,
+            cost: 0,
+        },
+    })
+    console.log('Created catalog item "Kentucky Deluxe" (placeholder cost/par - update with real numbers)')
+}
+
 async function main() {
+    await ensureKentuckyDeluxe()
+
     for (const m of mappings) {
         const item = await prisma.item.findFirst({ where: { name: m.catalogItemName } })
         if (!item) {
