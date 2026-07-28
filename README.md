@@ -38,6 +38,15 @@ Two CSV/XLSX importers deplete or add to inventory - both validate structure up 
 
 If you want other report formats supported (e.g. a different POS export, or a non-Sysco vendor invoice layout), the schemas in `lib/schemas.ts` and the parsing in the corresponding action are the place to extend - happy to wire up automated imports for a specific vendor/POS format if you share a sample export.
 
+## drink recipes
+
+For a sales import to actually deplete inventory (not just create an empty placeholder `Recipe`), the menu item needs a `Recipe` whose name exactly matches the sales report's item name, with `RecipeIngredient` rows pointing at real catalog items. `prisma/seed-drink-recipes.ts` and `prisma/seed-remaining-items.ts` set this up for the bar/drink menu (re-run either with `npx tsx prisma/<file>.ts` - both are idempotent). Two depletion patterns are used depending on how the catalog item is tracked:
+
+- **Whole units** (bottled beer, canned RTDs, sodas) - 1 sale depletes 1 unit of the item's own `unitType`.
+- **Fractional units** (spirits poured as a shot, draft beer poured from a keg) - depletes `pourSize / containerSize` per sale, computed from the item's `pourSizeOz`/`bottleVolumeMl` (or a keg-size constant for draft). This matters because `onHand` for these items is tracked in whole bottles/kegs, not ounces - depleting by a flat oz number instead of the fraction would drain a bottle roughly 15-30x too fast. Hookah flavor tobacco sidesteps the container-size question entirely by tracking `onHand` directly in `GRAM`s instead of canisters.
+
+Still not covered by these scripts (need more input from the business owner, not a guess): specialty cocktails with real ingredient ratios, and the pre-existing `Jack Daniels Shot` recipe/duplicate catalog entries.
+
 ## notes
 - This uses the Next.js app router so try to keep server actions separated in the `app/actions/` folder instead of mixing them into components.
 - There's a known quirk where Prisma sometimes gets out of sync locally. If your build fails complaining about missing types or exports, just run `npx prisma generate` to fix it up.
