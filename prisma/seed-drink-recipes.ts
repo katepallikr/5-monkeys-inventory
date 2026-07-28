@@ -55,6 +55,10 @@ const mappings: DrinkMapping[] = [
     { recipeName: 'Titos', catalogItemName: 'Tito’s Handmade Vodka' },
     { recipeName: 'Grey goose', catalogItemName: 'Grey Goose' },
     { recipeName: 'Jameson Irish', catalogItemName: 'Jameson Irish' },
+    { recipeName: 'Jack Daniels Tennessee Apple', catalogItemName: 'Jack Daniel’s Tennessee Apple' },
+    { recipeName: 'Jack Daniels Tennessee Fire', catalogItemName: 'Jack Daniel’s Tennessee Fire' },
+    { recipeName: 'Jose Cuervo Devils Reserve', catalogItemName: 'Jose Cuervo Devil’s Reserve' },
+    { recipeName: 'Skrewball Peanut butter', catalogItemName: 'Skrewball Peanut Butter Whiskey' },
 
     // Well pours - confirmed with the owner which bottle each one is.
     { recipeName: 'Well vodka', catalogItemName: 'Taaka' },
